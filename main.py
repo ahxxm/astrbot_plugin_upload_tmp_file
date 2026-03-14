@@ -1,14 +1,22 @@
+import os
 import re
 from pathlib import Path
 
 import aiohttp
 
 from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.message_components import File, Plain
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 
 LITTERBOX_ENDPOINT = "https://litterbox.catbox.moe/resources/internals/api.php"
 TMPFILES_ENDPOINT = "https://tmpfiles.org/api/v1/upload"
+
+MB = 1024 * 1024
+DEFAULT_FILE_SIZE_THRESHOLD = 50 * MB
+PLATFORM_FILE_SIZE_THRESHOLD = {
+    "discord": 25 * MB,
+}
 
 
 async def upload_to_litterbox(file_path: str, expiry: str = "24h") -> str:
@@ -59,8 +67,26 @@ class UploadTmpFilePlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
 
-    @filter.command("upload")
-    async def upload_command(self, event: AstrMessageEvent):
-        """上传文件到临时托管服务，获取下载链接"""
-        # TODO: wire to actual file from message event
-        yield event.plain_result("upload command received — file handling not yet wired")
+    @filter.on_decorating_result()
+    async def intercept_large_files(self, event: AstrMessageEvent):
+        result = event.get_result()
+        if result is None:
+            return
+        platform = event.get_platform_name()
+        threshold = PLATFORM_FILE_SIZE_THRESHOLD.get(platform, DEFAULT_FILE_SIZE_THRESHOLD)
+        chain = result.chain
+        for i, comp in enumerate(chain):
+            if not isinstance(comp, File):
+                continue
+            local_path = await comp.get_file()
+            if not local_path or not os.path.exists(local_path):
+                continue
+            size = os.path.getsize(local_path)
+            if size <= threshold:
+                continue
+            logger.info(f"File {comp.name} is {size} bytes, uploading to temp hosting")
+            try:
+                url = await upload_file(local_path)
+                chain[i] = Plain(f"[文件] {comp.name}\n{url}")
+            except Exception as e:
+                logger.error(f"Failed to upload {comp.name}: {e}")
