@@ -1,14 +1,26 @@
-# astrbot-plugin-helloworld
+# astrbot_plugin_upload_tmp_file
 
-AstrBot 插件模板 / A template plugin for AstrBot plugin feature
+[AstrBot](https://github.com/AstrBotDevs/AstrBot) plugin that automatically uploads large files to temporary hosting services when they exceed platform size limits.
 
-> [!NOTE]
-> This repo is just a template of [AstrBot](https://github.com/AstrBotDevs/AstrBot) Plugin.
-> 
-> [AstrBot](https://github.com/AstrBotDevs/AstrBot) is an agentic assistant for both personal and group conversations. It can be deployed across dozens of mainstream instant messaging platforms, including QQ, Telegram, Feishu, DingTalk, Slack, LINE, Discord, Matrix, etc. In addition, it provides a reliable and extensible conversational AI infrastructure for individuals, developers, and teams. Whether you need a personal AI companion, an intelligent customer support agent, an automation assistant, or an enterprise knowledge base, AstrBot enables you to quickly build AI applications directly within your existing messaging workflows.
+## How it works
 
-# Supports
+The plugin intercepts outgoing messages before they reach the platform. When a file attachment exceeds the platform's size limit, it uploads the file to a temporary hosting service and replaces the attachment with a download link.
 
-- [AstrBot Repo](https://github.com/AstrBotDevs/AstrBot)
-- [AstrBot Plugin Development Docs (Chinese)](https://docs.astrbot.app/dev/star/plugin-new.html)
-- [AstrBot Plugin Development Docs (English)](https://docs.astrbot.app/en/dev/star/plugin-new.html)
+- **litterbox.catbox.moe** (primary) — up to 1GB, 72h expiry
+- **tmpfiles.org** (fallback) — up to 100MB, 60min expiry
+
+## Platform size limits
+
+| Platform | Threshold |
+|---|---|
+| Discord | 25 MB |
+| Others (Telegram, QQ, etc.) | 50 MB |
+
+## Installation
+
+Install through AstrBot WebUI plugin management, or clone into `AstrBot/data/plugins/`:
+
+```bash
+cd AstrBot/data/plugins
+git clone https://github.com/ahxxm/astrbot_plugin_upload_tmp_file
+```

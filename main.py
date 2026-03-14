@@ -19,7 +19,7 @@ PLATFORM_FILE_SIZE_THRESHOLD = {
 }
 
 
-async def upload_to_litterbox(file_path: str, expiry: str = "24h") -> str:
+async def upload_to_litterbox(file_path: str, expiry: str = "72h") -> str:
     """Upload a file to litterbox.catbox.moe. Returns direct download URL."""
     path = Path(file_path)
     async with aiohttp.ClientSession() as session:
@@ -49,7 +49,7 @@ async def upload_to_tmpfiles(file_path: str) -> str:
     return re.sub(r"(tmpfiles\.org)/", r"\1/dl/", page_url, count=1)
 
 
-async def upload_file(file_path: str, expiry: str = "24h") -> str:
+async def upload_file(file_path: str, expiry: str = "72h") -> str:
     """Try litterbox first, fall back to tmpfiles.org."""
     try:
         url = await upload_to_litterbox(file_path, expiry)
@@ -62,31 +62,51 @@ async def upload_file(file_path: str, expiry: str = "24h") -> str:
     return url
 
 
+async def replace_large_files(chain: list, threshold: int) -> list:
+    for i, comp in enumerate(chain):
+        if not isinstance(comp, File):
+            continue
+        local_path = await comp.get_file()
+        if not local_path or not os.path.exists(local_path):
+            continue
+        size = os.path.getsize(local_path)
+        if size <= threshold:
+            continue
+        logger.info(f"File {comp.name} is {size} bytes, uploading to temp hosting")
+        try:
+            url = await upload_file(local_path)
+            chain[i] = Plain(f"[文件] {comp.name}\n{url}")
+        except Exception as e:
+            logger.error(f"Failed to upload {comp.name}: {e}")
+    return chain
+
+
 @register("upload_tmp_file", "ahxxm", "上传文件到临时文件托管服务", "0.1.0")
 class UploadTmpFilePlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
 
+    async def initialize(self):
+        # Patch context.send_message to intercept Path B
+        # (agent tool send_message_to_user bypasses the normal pipeline)
+        original_send = self.context.send_message
+
+        async def patched_send(session, message_chain):
+            platform_name = session if isinstance(session, str) else session.platform_name
+            threshold = PLATFORM_FILE_SIZE_THRESHOLD.get(
+                platform_name, DEFAULT_FILE_SIZE_THRESHOLD
+            )
+            await replace_large_files(message_chain.chain, threshold)
+            return await original_send(session, message_chain)
+
+        self.context.send_message = patched_send
+
     @filter.on_decorating_result()
     async def intercept_large_files(self, event: AstrMessageEvent):
+        # Path A: normal pipeline responses
         result = event.get_result()
         if result is None:
             return
         platform = event.get_platform_name()
         threshold = PLATFORM_FILE_SIZE_THRESHOLD.get(platform, DEFAULT_FILE_SIZE_THRESHOLD)
-        chain = result.chain
-        for i, comp in enumerate(chain):
-            if not isinstance(comp, File):
-                continue
-            local_path = await comp.get_file()
-            if not local_path or not os.path.exists(local_path):
-                continue
-            size = os.path.getsize(local_path)
-            if size <= threshold:
-                continue
-            logger.info(f"File {comp.name} is {size} bytes, uploading to temp hosting")
-            try:
-                url = await upload_file(local_path)
-                chain[i] = Plain(f"[文件] {comp.name}\n{url}")
-            except Exception as e:
-                logger.error(f"Failed to upload {comp.name}: {e}")
+        await replace_large_files(result.chain, threshold)
